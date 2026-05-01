@@ -1,0 +1,1109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Z-test Power Demo Clean Rebuild v11</title>
+
+<style>
+:root{
+  --module-width: 640px;
+  --text: #222;
+  --border: #b8b8b8;
+  --type1-text: #d62828;
+  --power-text: #118a35;
+}
+
+html, body{
+  margin:0;
+  padding:0;
+  background:white;
+  color:var(--text);
+  font-family:system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#zPowerDemo{
+  width:var(--module-width);
+  box-sizing:border-box;
+  margin:0 auto;
+  padding:6px 6px 8px 6px;
+}
+
+canvas{
+  display:block;
+  width:628px;
+  height:380px;
+  box-sizing:border-box;
+  background:#fff;
+  border:1px solid #999;
+}
+
+.controls{
+  width:628px;
+  box-sizing:border-box;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:6px 10px;
+  margin-top:8px;
+}
+
+.control{
+  display:grid;
+  grid-template-columns: 92px 1fr 62px;
+  align-items:center;
+  gap:6px;
+  font-size:12px;
+}
+
+.control label{
+  white-space:nowrap;
+  color:#333;
+}
+
+input[type="range"]{ width:100%; }
+
+input[type="number"]{
+  width:62px;
+  box-sizing:border-box;
+  font-size:12px;
+  padding:2px 4px;
+  border:1px solid #bbb;
+  border-radius:5px;
+}
+
+select{
+  font-size:12px;
+  padding:2px 4px;
+  border:1px solid #bbb;
+  border-radius:5px;
+  background:white;
+}
+
+.matrixWrap{
+  width:628px;
+  margin-top:8px;
+}
+
+.things{
+  width:100%;
+  border-collapse:separate;
+  border-spacing:0;
+  font-size:12px;
+  border:1px solid #d0d0d0;
+  border-radius:10px;
+  overflow:hidden;
+}
+
+.things th,
+.things td{
+  border-right:1px solid #d0d0d0;
+  border-bottom:1px solid #d0d0d0;
+  padding:5px 6px;
+  text-align:center;
+  vertical-align:middle;
+}
+
+.things th{
+  background:#fafafa;
+  font-weight:700;
+}
+
+.things tr:last-child th,
+.things tr:last-child td{ border-bottom:0; }
+
+.things th:last-child,
+.things td:last-child{ border-right:0; }
+
+.redText{ color:var(--type1-text); font-weight:700; }
+.greenText{ color:var(--power-text); font-weight:700; }
+.axisState{ display:none; }
+</style>
+</head>
+
+<body>
+<div id="zPowerDemo">
+
+  <canvas id="plot" width="628" height="380"></canvas>
+
+  <div class="controls">
+    <div class="control">
+      <label for="mu0Slider">H₀ mean μ₀</label>
+      <input id="mu0Slider" type="range">
+      <input id="mu0Box" type="number">
+    </div>
+
+    <div class="control">
+      <label for="mu1Slider">True mean μ₁</label>
+      <input id="mu1Slider" type="range">
+      <input id="mu1Box" type="number">
+    </div>
+
+    <div class="control">
+      <label for="sigmaSlider">SD σ</label>
+      <input id="sigmaSlider" type="range">
+      <input id="sigmaBox" type="number">
+    </div>
+
+    <div class="control">
+      <label for="nSlider">sample size n</label>
+      <input id="nSlider" type="range">
+      <input id="nBox" type="number">
+    </div>
+
+    <div class="control">
+      <label for="alphaSlider">alpha α</label>
+      <input id="alphaSlider" type="range">
+      <input id="alphaBox" type="number">
+    </div>
+
+    <div class="control">
+      <label for="tailSelect">tails</label>
+      <select id="tailSelect">
+        <option value="greater">one-tailed: μ₁ &gt; μ₀</option>
+        <option value="less">one-tailed: μ₁ &lt; μ₀</option>
+        <option value="two">two-tailed</option>
+      </select>
+      <span></span>
+    </div>
+  </div>
+
+  <input class="axisState" id="showZ" type="checkbox" checked>
+  <input class="axisState" id="showX" type="checkbox">
+
+  <div class="matrixWrap">
+    <table class="things">
+      <tr>
+        <th></th>
+        <th>H₀ true</th>
+        <th>H₀ false</th>
+      </tr>
+      <tr>
+        <th>Reject H₀</th>
+        <td class="redText">Type I error<br><span id="type1Cell"></span></td>
+        <td class="greenText">Power<br><span id="powerCell"></span></td>
+      </tr>
+      <tr>
+        <th>Fail to reject H₀</th>
+        <td>Correct<br><span id="correctCell"></span></td>
+        <td>Type II error<br><span id="type2Cell"></span></td>
+      </tr>
+    </table>
+  </div>
+
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ============================================================
+   SINGLE SOURCE OF TRUTH
+   ============================================================ */
+
+const PARAMS = {
+  mu0: 100,
+  mu1: 106,
+  sigma: 15,
+  n: 9,
+  alpha: 0.05,
+  tail: "greater"
+};
+
+const RANGES = {
+  mu0:    {min: 0, max: 200, step: 1, digits: 0},
+  mu1:    {min: 0, max: 200, step: 1, digits: 0},
+  sigma:  {min: 1, max: 50,  step: 1, digits: 0},
+  n:      {min: 1, max: 200, step: 1, digits: 0},
+  alpha:  {min: 0, max: 1, step: 0.01, digits: 2}
+};
+
+const X_AXIS_SD_RANGE = 4;
+
+const LAYOUT = {
+  width: 628,
+  height: 380,
+  plotLeft: 44,
+  plotRight: 10,
+  plotTop: 28,
+  plotBottom: 50
+};
+
+const STYLE = {
+  h0: "#111111",
+  truth: "#111111",
+  crit: "#2248ff",
+  grid: "#e9e9e9",
+  gridLight: "#f3f3f3",
+  axis: "#333333",
+  type1Fill: "rgba(197, 75, 0, 0.78)",
+  powerFill: "rgba(112, 239, 112, 0.45)",
+  redText: "#d62828",
+  greenText: "#118a35",
+  zBlue: "#2248ff",
+  dim: "#aaa"
+};
+
+const state = {...PARAMS};
+
+const els = {
+  canvas: document.getElementById("plot"),
+  showZ: document.getElementById("showZ"),
+  showX: document.getElementById("showX"),
+  tailSelect: document.getElementById("tailSelect"),
+  type1Cell: document.getElementById("type1Cell"),
+  powerCell: document.getElementById("powerCell"),
+  correctCell: document.getElementById("correctCell"),
+  type2Cell: document.getElementById("type2Cell")
+};
+
+const ctx = els.canvas.getContext("2d");
+let axisHit = {z:null, x:null};
+let drag = null;
+
+init();
+
+/* ============================================================
+   INITIALIZATION
+   ============================================================ */
+
+function init(){
+  bindPair("mu0", "mu0Slider", "mu0Box");
+  bindPair("mu1", "mu1Slider", "mu1Box");
+  bindPair("sigma", "sigmaSlider", "sigmaBox");
+  bindPair("n", "nSlider", "nBox");
+  bindPair("alpha", "alphaSlider", "alphaBox");
+
+  els.tailSelect.value = state.tail;
+  els.tailSelect.addEventListener("change", () => {
+    state.tail = els.tailSelect.value;
+    draw();
+  });
+
+  els.canvas.addEventListener("pointerdown", onPointerDown);
+  els.canvas.addEventListener("pointermove", onPointerMove);
+  els.canvas.addEventListener("pointerup", onPointerUp);
+  els.canvas.addEventListener("pointerleave", onPointerUp);
+
+  syncControls();
+  draw();
+}
+
+function bindPair(name, sliderId, boxId){
+  const slider = document.getElementById(sliderId);
+  const box = document.getElementById(boxId);
+  const r = RANGES[name];
+
+  slider.min = r.min;
+  slider.max = r.max;
+  slider.step = r.step;
+
+  box.min = r.min;
+  box.max = r.max;
+  box.step = r.step;
+
+  slider.addEventListener("input", () => {
+    setParam(name, parseFloat(slider.value), true);
+  });
+
+  box.addEventListener("input", () => {
+    const v = parseFloat(box.value);
+    if (Number.isFinite(v)){
+      setParam(name, v, false);
+      slider.value = state[name];
+      draw();
+    }
+  });
+
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") box.blur();
+  });
+
+  box.addEventListener("blur", () => {
+    const v = parseFloat(box.value);
+    if (Number.isFinite(v)){
+      setParam(name, v, true);
+    } else {
+      syncControls();
+      draw();
+    }
+  });
+}
+
+function setParam(name, value, sync){
+  const r = RANGES[name];
+  value = clamp(value, r.min, r.max);
+  if (name === "n") value = Math.round(value);
+  state[name] = value;
+  if (sync) syncControls();
+  draw();
+}
+
+function syncControls(){
+  syncOne("mu0", "mu0Slider", "mu0Box");
+  syncOne("mu1", "mu1Slider", "mu1Box");
+  syncOne("sigma", "sigmaSlider", "sigmaBox");
+  syncOne("n", "nSlider", "nBox");
+  syncOne("alpha", "alphaSlider", "alphaBox");
+  els.tailSelect.value = state.tail;
+}
+
+function syncOne(name, sliderId, boxId){
+  const slider = document.getElementById(sliderId);
+  const box = document.getElementById(boxId);
+  const digits = RANGES[name].digits;
+
+  slider.value = state[name];
+  if (document.activeElement !== box){
+    box.value = fmt(state[name], digits);
+  }
+}
+
+/* ============================================================
+   COMPUTATION
+   ============================================================ */
+
+function compute(){
+  const se = state.sigma / Math.sqrt(state.n);
+  const d = (state.mu1 - state.mu0) / state.sigma;
+  const alpha = clamp(state.alpha, 0, 1);
+  const safeAlpha = clamp(alpha, 1e-8, 1 - 1e-8);
+
+  let critLow = -Infinity;
+  let critHigh = Infinity;
+
+  if (state.tail === "greater"){
+    critHigh = state.mu0 + se * qnorm(1 - safeAlpha);
+  } else if (state.tail === "less"){
+    critLow = state.mu0 + se * qnorm(safeAlpha);
+  } else {
+    critLow = state.mu0 + se * qnorm(safeAlpha / 2);
+    critHigh = state.mu0 + se * qnorm(1 - safeAlpha / 2);
+  }
+
+  const alphaActual =
+    normCdf((critLow - state.mu0) / se) +
+    (1 - normCdf((critHigh - state.mu0) / se));
+
+  const power =
+    normCdf((critLow - state.mu1) / se) +
+    (1 - normCdf((critHigh - state.mu1) / se));
+
+  return {
+    se,
+    d,
+    critLow,
+    critHigh,
+    alphaActual,
+    power,
+    beta: 1 - power
+  };
+}
+
+function getBounds(c){
+  // Raw x-space bounds. Keep the visible x-range fixed at a chosen number
+  // of population SDs beyond the lowest and highest distribution means.
+  const loMean = Math.min(state.mu0, state.mu1);
+  const hiMean = Math.max(state.mu0, state.mu1);
+
+  return {
+    xMin: loMean - X_AXIS_SD_RANGE * c.se,
+    xMax: hiMean + X_AXIS_SD_RANGE * c.se,
+    yMax: 0.418
+  };
+}
+
+function makeTransform(bounds){
+  const plotW = LAYOUT.width - LAYOUT.plotLeft - LAYOUT.plotRight;
+  const plotH = LAYOUT.height - LAYOUT.plotTop - LAYOUT.plotBottom;
+
+  return {
+    xToPx(x){
+      return LAYOUT.plotLeft + (x - bounds.xMin) / (bounds.xMax - bounds.xMin) * plotW;
+    },
+    yToPx(y){
+      return LAYOUT.plotTop + (1 - y / bounds.yMax) * plotH;
+    },
+    pxToX(px){
+      return bounds.xMin + (px - LAYOUT.plotLeft) / plotW * (bounds.xMax - bounds.xMin);
+    },
+    baseY(){
+      return LAYOUT.height - LAYOUT.plotBottom;
+    }
+  };
+}
+
+function xToZ(x, c){
+  return (x - state.mu0) / c.se;
+}
+
+function zToX(z, c){
+  return state.mu0 + z * c.se;
+}
+
+/* ============================================================
+   RENDERING
+   ============================================================ */
+
+function draw(){
+  const c = compute();
+  const bounds = getBounds(c);
+  const t = makeTransform(bounds);
+
+  ctx.clearRect(0, 0, LAYOUT.width, LAYOUT.height);
+
+  drawGrid(t, c, bounds);
+  drawFills(t, c, bounds);
+  drawCurves(t, c, bounds);
+  drawCriticalLines(t, c, bounds);
+  drawMeanLines(t, c);
+  drawDistributionLabels(t, c);
+  drawCompactSummary(t, c);
+  drawCriticalLabels(t, c);
+  drawAxes(t, c, bounds);
+
+  updateMatrix(c);
+}
+
+function drawGrid(t, c, bounds){
+  const baseY = t.baseY();
+
+  ctx.save();
+
+  ctx.strokeStyle = STYLE.grid;
+  ctx.lineWidth = 1;
+  ctx.font = "12px system-ui, sans-serif";
+  ctx.fillStyle = "#555";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+
+  for (let y = 0; y <= 0.401; y += 0.1){
+    const py = t.yToPx(y);
+    ctx.beginPath();
+    ctx.moveTo(LAYOUT.plotLeft, py);
+    ctx.lineTo(LAYOUT.width - LAYOUT.plotRight, py);
+    ctx.stroke();
+    ctx.fillText(y.toFixed(1), LAYOUT.plotLeft - 7, py);
+  }
+
+  ctx.strokeStyle = STYLE.gridLight;
+  for (let y = 0.05; y <= 0.351; y += 0.1){
+    const py = t.yToPx(y);
+    ctx.beginPath();
+    ctx.moveTo(LAYOUT.plotLeft, py);
+    ctx.lineTo(LAYOUT.width - LAYOUT.plotRight, py);
+    ctx.stroke();
+  }
+
+  // Vertical grid at integer z values, but positioned in raw x space.
+  ctx.strokeStyle = STYLE.grid;
+  for (let z = Math.ceil(xToZ(bounds.xMin, c)); z <= Math.floor(xToZ(bounds.xMax, c)); z++){
+    const x = zToX(z, c);
+    const px = t.xToPx(x);
+    ctx.beginPath();
+    ctx.moveTo(px, LAYOUT.plotTop);
+    ctx.lineTo(px, baseY);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = STYLE.axis;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(LAYOUT.plotLeft, baseY);
+  ctx.lineTo(LAYOUT.width - LAYOUT.plotRight, baseY);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawFills(t, c, bounds){
+  if (state.tail === "greater"){
+    fillUnderCurve(t, c.critHigh, bounds.xMax, state.mu1, c, STYLE.powerFill);
+    fillUnderCurve(t, c.critHigh, bounds.xMax, state.mu0, c, STYLE.type1Fill);
+  } else if (state.tail === "less"){
+    fillUnderCurve(t, bounds.xMin, c.critLow, state.mu1, c, STYLE.powerFill);
+    fillUnderCurve(t, bounds.xMin, c.critLow, state.mu0, c, STYLE.type1Fill);
+  } else {
+    fillUnderCurve(t, bounds.xMin, c.critLow, state.mu1, c, STYLE.powerFill);
+    fillUnderCurve(t, c.critHigh, bounds.xMax, state.mu1, c, STYLE.powerFill);
+    fillUnderCurve(t, bounds.xMin, c.critLow, state.mu0, c, STYLE.type1Fill);
+    fillUnderCurve(t, c.critHigh, bounds.xMax, state.mu0, c, STYLE.type1Fill);
+  }
+}
+
+function fillUnderCurve(t, xA, xB, mu, c, fillStyle){
+  const lo = Math.max(xA, t.pxToX(LAYOUT.plotLeft));
+  const hi = Math.min(xB, t.pxToX(LAYOUT.width - LAYOUT.plotRight));
+  if (!(hi > lo)) return;
+
+  const N = 160;
+  const baseY = t.baseY();
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(t.xToPx(lo), baseY);
+
+  for (let i = 0; i <= N; i++){
+    const x = lo + (hi - lo) * i / N;
+    const y = normalPdf(x, mu, c.se) * c.se;
+    ctx.lineTo(t.xToPx(x), t.yToPx(y));
+  }
+
+  ctx.lineTo(t.xToPx(hi), baseY);
+  ctx.closePath();
+  ctx.fillStyle = fillStyle;
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawCurves(t, c, bounds){
+  drawCurve(t, state.mu0, c, STYLE.h0, 1.25, bounds);
+  drawCurve(t, state.mu1, c, STYLE.truth, 1.25, bounds);
+}
+
+function drawCurve(t, mu, c, color, width, bounds){
+  const N = 500;
+  ctx.save();
+  ctx.beginPath();
+
+  for (let i = 0; i <= N; i++){
+    const x = bounds.xMin + (bounds.xMax - bounds.xMin) * i / N;
+    const y = normalPdf(x, mu, c.se) * c.se;
+    const px = t.xToPx(x);
+    const py = t.yToPx(y);
+
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawCriticalLines(t, c, bounds){
+  ctx.save();
+  ctx.strokeStyle = STYLE.crit;
+  ctx.lineWidth = 1.4;
+
+  if (Number.isFinite(c.critLow) && c.critLow >= bounds.xMin && c.critLow <= bounds.xMax){
+    vLine(t.xToPx(c.critLow), LAYOUT.plotTop, t.baseY());
+  }
+
+  if (Number.isFinite(c.critHigh) && c.critHigh >= bounds.xMin && c.critHigh <= bounds.xMax){
+    vLine(t.xToPx(c.critHigh), LAYOUT.plotTop, t.baseY());
+  }
+
+  ctx.restore();
+}
+
+function drawMeanLines(t, c){
+  ctx.save();
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = "rgba(0,0,0,0.20)";
+  ctx.lineWidth = 1;
+  vLine(t.xToPx(state.mu0), LAYOUT.plotTop, t.baseY());
+  vLine(t.xToPx(state.mu1), LAYOUT.plotTop, t.baseY());
+  ctx.restore();
+}
+
+function drawDistributionLabels(t, c){
+  ctx.save();
+  ctx.font = "12px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#111";
+
+  const y = LAYOUT.plotTop - 22;
+  const minX = LAYOUT.plotLeft + 55;
+  const maxX = LAYOUT.width - LAYOUT.plotRight - 55;
+
+  const h0X = clamp(t.xToPx(state.mu0), minX, maxX);
+  const trueX = clamp(t.xToPx(state.mu1), minX, maxX);
+
+  ctx.fillText("H₀ distribution", h0X, y);
+  ctx.fillText("True distribution", trueX, y + 16);
+
+  ctx.restore();
+}
+
+function drawStats(t, c){
+  const x = LAYOUT.plotLeft + 8;
+  const y = LAYOUT.plotTop + 8;
+  const w = 165;
+  const h = 56;
+
+  ctx.save();
+
+  // Rounded white window
+  roundRect(ctx, x - 6, y - 5, w, h, 9);
+  ctx.fillStyle = "rgba(255,255,255,0.88)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(0,0,0,0.18)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#222";
+
+  // Standard error line:
+  // S_{xbar} = sigma / sqrt(n) = value
+  drawSxbarFormula(x, y, state.sigma, state.n, c.se);
+
+  // Effect size line:
+  // d = (mu1 - mu0) / sigma = value
+  ctx.font = "italic 12px system-ui, sans-serif";
+  const y2 = y + 30;
+  ctx.fillText(
+    "d = (" + fmt(state.mu1,0) + " − " + fmt(state.mu0,0) + ") / " +
+    fmt(state.sigma,0) + " = " + fmt(c.d,2),
+    x,
+    y2
+  );
+
+  ctx.restore();
+}
+
+function drawSxbarFormula(x, y, sigma, n, se){
+  // Draw S_{x-bar} manually so the bar/subscript align reliably.
+  ctx.save();
+  ctx.fillStyle = "#222";
+  ctx.textBaseline = "top";
+
+  ctx.font = "12px system-ui, sans-serif";
+  ctx.fillText("S", x, y);
+
+  const sWidth = ctx.measureText("S").width;
+  const subX = x + sWidth + 1;
+  const subY = y + 6;
+
+  ctx.font = "10px system-ui, sans-serif";
+  ctx.fillText("x", subX, subY);
+
+  const xWidth = ctx.measureText("x").width;
+  ctx.strokeStyle = "#222";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(subX - 0.5, subY - 1.5);
+  ctx.lineTo(subX + xWidth + 0.5, subY - 1.5);
+  ctx.stroke();
+
+  ctx.font = "12px system-ui, sans-serif";
+  const restX = subX + xWidth + 2;
+  ctx.fillText(
+    " = " + fmt(sigma,0) + " / √(" + fmt(n,0) + ") = " + fmt(se,2),
+    restX,
+    y
+  );
+
+  ctx.restore();
+}
+
+function roundRect(ctx, x, y, w, h, r){
+  const rr = Math.min(r, w/2, h/2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.lineTo(x + w - rr, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+  ctx.lineTo(x + w, y + h - rr);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+  ctx.lineTo(x + rr, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
+  ctx.lineTo(x, y + rr);
+  ctx.quadraticCurveTo(x, y, x + rr, y);
+  ctx.closePath();
+}
+
+
+function drawCompactSummary(t, c){
+  ctx.save();
+  ctx.font = "12px system-ui, sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#222";
+
+  const x = LAYOUT.plotLeft + 8;
+  const y = LAYOUT.plotTop + 8;
+
+  const meanDiff = state.mu1 - state.mu0;
+  const zDiff = meanDiff / c.se;
+
+  ctx.fillText("d = " + fmt(c.d, 2), x, y);
+  ctx.fillText("mean difference z = " + fmt(zDiff, 2), x, y + 16);
+
+  ctx.restore();
+}
+
+function drawCriticalLabels(t, c){
+  ctx.save();
+  ctx.font = "12px system-ui, sans-serif";
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+  ctx.fillStyle = STYLE.crit;
+
+  const y = LAYOUT.plotTop + 8;
+
+  if (state.tail === "greater" || state.tail === "two"){
+    drawOneCriticalLabel(t, c, c.critHigh, y);
+  }
+
+  if (state.tail === "less" || state.tail === "two"){
+    drawOneCriticalLabel(t, c, c.critLow, y + 16);
+  }
+
+  ctx.restore();
+}
+
+function drawOneCriticalLabel(t, c, xCrit, y){
+  if (!Number.isFinite(xCrit)) return;
+
+  const bits = [];
+  if (els.showZ.checked) bits.push("z = " + fmt(xToZ(xCrit, c), 2));
+  if (els.showX.checked) bits.push("x = " + fmt(xCrit, 1));
+
+  const label = bits.length ? "crit: " + bits.join(", ") : "crit";
+  ctx.fillText(label, t.xToPx(xCrit) + 5, y);
+}
+
+function drawAxes(t, c, bounds){
+  const baseY = t.baseY();
+  const showZ = els.showZ.checked;
+  const showX = els.showX.checked;
+
+  ctx.save();
+  ctx.strokeStyle = STYLE.axis;
+  ctx.fillStyle = STYLE.axis;
+  ctx.font = "12px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+
+  for (let z = Math.ceil(xToZ(bounds.xMin, c)); z <= Math.floor(xToZ(bounds.xMax, c)); z++){
+    const x = zToX(z, c);
+    const px = t.xToPx(x);
+
+    ctx.beginPath();
+    ctx.moveTo(px, baseY);
+    ctx.lineTo(px, baseY + 5);
+    ctx.stroke();
+
+    if (showZ) ctx.fillText(String(z), px, baseY + 8);
+    if (showX) ctx.fillText(fmt(x, 0), px, baseY + 24);
+  }
+
+  drawAxisToggles(t, showZ, showX);
+  ctx.restore();
+}
+
+function drawAxisToggles(t, showZ, showX){
+  const baseY = t.baseY();
+  const labelX = LAYOUT.plotLeft - 8;
+  const zY = baseY + 8;
+  const xY = baseY + 24;
+
+  drawAxisToggle(labelX, zY, "z", showZ, STYLE.zBlue);
+  drawAxisToggle(labelX, xY, "x", showX, "#333");
+
+  axisHit.z = {x: labelX - 31, y: zY - 5, w: 45, h: 22};
+  axisHit.x = {x: labelX - 31, y: xY - 5, w: 45, h: 22};
+}
+
+function drawAxisToggle(x, y, label, checked, color){
+  const box = 10;
+  const bx = x - 22;
+  const by = y + 2;
+  const drawColor = checked ? color : STYLE.dim;
+
+  ctx.save();
+  ctx.lineWidth = 1.2;
+
+  ctx.fillStyle = "#fff";
+  ctx.strokeStyle = drawColor;
+  ctx.fillRect(bx, by, box, box);
+  ctx.strokeRect(bx, by, box, box);
+
+  if (checked){
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.7;
+    ctx.beginPath();
+    ctx.moveTo(bx + 2.2, by + 2.2);
+    ctx.lineTo(bx + 7.8, by + 7.8);
+    ctx.moveTo(bx + 7.8, by + 2.2);
+    ctx.lineTo(bx + 2.2, by + 7.8);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = drawColor;
+  ctx.font = "12px system-ui, sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "top";
+  ctx.fillText(label, x, y);
+
+  ctx.restore();
+}
+
+function updateMatrix(c){
+  els.type1Cell.textContent = "α = " + fmt(c.alphaActual, 3);
+  els.powerCell.textContent = "1 − β = " + fmt(c.power, 3);
+  els.correctCell.textContent = "1 − α = " + fmt(1 - c.alphaActual, 3);
+  els.type2Cell.textContent = "β = " + fmt(c.beta, 3);
+}
+
+/* ============================================================
+   INTERACTION
+   ============================================================ */
+
+function onPointerDown(e){
+  const p = pointer(e);
+
+  if (hit(p, axisHit.z)){
+    els.showZ.checked = !els.showZ.checked;
+    draw();
+    e.preventDefault();
+    return;
+  }
+
+  if (hit(p, axisHit.x)){
+    els.showX.checked = !els.showX.checked;
+    draw();
+    e.preventDefault();
+    return;
+  }
+
+  const c = compute();
+  const bounds = getBounds(c);
+  const t = makeTransform(bounds);
+  const x = t.pxToX(p.x);
+
+  // Critical lines first.
+  if (Number.isFinite(c.critLow) && Math.abs(p.x - t.xToPx(c.critLow)) < 10){
+    drag = {kind:"critLow", offset:0};
+    els.canvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    return;
+  }
+
+  if (Number.isFinite(c.critHigh) && Math.abs(p.x - t.xToPx(c.critHigh)) < 10){
+    drag = {kind:"critHigh", offset:0};
+    els.canvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    return;
+  }
+
+  const y0 = normalPdf(x, state.mu0, c.se) * c.se;
+  const y1 = normalPdf(x, state.mu1, c.se) * c.se;
+  const d0 = Math.abs(p.y - t.yToPx(y0));
+  const d1 = Math.abs(p.y - t.yToPx(y1));
+  const curveTol = 12;
+
+  let kind = null;
+  if (d0 < curveTol || d1 < curveTol){
+    if (Math.abs(d0 - d1) < 2){
+      const mid = (state.mu0 + state.mu1) / 2;
+      kind = x <= mid ? "mu0" : "mu1";
+    } else {
+      kind = d0 < d1 ? "mu0" : "mu1";
+    }
+  }
+
+  if (!kind && Math.abs(p.x - t.xToPx(state.mu0)) < 10) kind = "mu0";
+  if (!kind && Math.abs(p.x - t.xToPx(state.mu1)) < 10) kind = "mu1";
+
+  if (kind){
+    drag = {
+      kind,
+      offset: kind === "mu0" ? x - state.mu0 : x - state.mu1
+    };
+    els.canvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+}
+
+function onPointerMove(e){
+  const p = pointer(e);
+  const c = compute();
+  const bounds = getBounds(c);
+  const t = makeTransform(bounds);
+  const x = t.pxToX(p.x);
+
+  if (!drag){
+    els.canvas.style.cursor = hoverTarget(p, t, c) ? "ew-resize" : "default";
+    if (hit(p, axisHit.z) || hit(p, axisHit.x)) els.canvas.style.cursor = "pointer";
+    return;
+  }
+
+  if (drag.kind === "mu0"){
+    state.mu0 = clamp(x - drag.offset, RANGES.mu0.min, RANGES.mu0.max);
+  } else if (drag.kind === "mu1"){
+    state.mu1 = clamp(x - drag.offset, RANGES.mu1.min, RANGES.mu1.max);
+  } else if (drag.kind === "critHigh" || drag.kind === "critLow"){
+    updateAlphaFromCrit(x);
+  }
+
+  syncControls();
+  draw();
+  e.preventDefault();
+}
+
+function onPointerUp(e){
+  if (!drag) return;
+  drag = null;
+  try{ els.canvas.releasePointerCapture(e.pointerId); }catch(err){}
+}
+
+function hoverTarget(p, t, c){
+  const x = t.pxToX(p.x);
+
+  if (Number.isFinite(c.critLow) && Math.abs(p.x - t.xToPx(c.critLow)) < 10) return true;
+  if (Number.isFinite(c.critHigh) && Math.abs(p.x - t.xToPx(c.critHigh)) < 10) return true;
+
+  const y0 = normalPdf(x, state.mu0, c.se) * c.se;
+  const y1 = normalPdf(x, state.mu1, c.se) * c.se;
+
+  if (Math.abs(p.y - t.yToPx(y0)) < 10) return true;
+  if (Math.abs(p.y - t.yToPx(y1)) < 10) return true;
+
+  if (Math.abs(p.x - t.xToPx(state.mu0)) < 10) return true;
+  if (Math.abs(p.x - t.xToPx(state.mu1)) < 10) return true;
+
+  return false;
+}
+
+function updateAlphaFromCrit(xCrit){
+  const c = compute();
+  const z = (xCrit - state.mu0) / c.se;
+  let a = state.alpha;
+
+  if (state.tail === "greater"){
+    a = 1 - normCdf(z);
+  } else if (state.tail === "less"){
+    a = normCdf(z);
+  } else {
+    a = 2 * (1 - normCdf(Math.abs(z)));
+  }
+
+  state.alpha = clamp(a, 0, 1);
+}
+
+/* ============================================================
+   UTILITIES
+   ============================================================ */
+
+function vLine(px, y1, y2){
+  ctx.beginPath();
+  ctx.moveTo(px, y1);
+  ctx.lineTo(px, y2);
+  ctx.stroke();
+}
+
+function pointer(e){
+  const r = els.canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left) * (els.canvas.width / r.width),
+    y: (e.clientY - r.top) * (els.canvas.height / r.height)
+  };
+}
+
+function hit(p, box){
+  return box &&
+    p.x >= box.x && p.x <= box.x + box.w &&
+    p.y >= box.y && p.y <= box.y + box.h;
+}
+
+function normalPdf(x, mu, sd){
+  const z = (x - mu) / sd;
+  return Math.exp(-0.5*z*z) / (sd * Math.sqrt(2*Math.PI));
+}
+
+function normCdf(z){
+  return 0.5 * (1 + erf(z / Math.SQRT2));
+}
+
+function erf(x){
+  const sign = x < 0 ? -1 : 1;
+  x = Math.abs(x);
+
+  const a1 = 0.254829592;
+  const a2 = -0.284496736;
+  const a3 = 1.421413741;
+  const a4 = -1.453152027;
+  const a5 = 1.061405429;
+  const p = 0.3275911;
+
+  const t = 1 / (1 + p*x);
+  const y = 1 - (((((a5*t + a4)*t + a3)*t + a2)*t + a1)*t)*Math.exp(-x*x);
+  return sign * y;
+}
+
+function qnorm(p){
+  p = clamp(p, 1e-12, 1 - 1e-12);
+
+  const a = [
+    -3.969683028665376e+01,
+     2.209460984245205e+02,
+    -2.759285104469687e+02,
+     1.383577518672690e+02,
+    -3.066479806614716e+01,
+     2.506628277459239e+00
+  ];
+
+  const b = [
+    -5.447609879822406e+01,
+     1.615858368580409e+02,
+    -1.556989798866e+02,
+     6.680131188771972e+01,
+    -1.328068155288572e+01
+  ];
+
+  const cc = [
+    -7.784894002430293e-03,
+    -3.223964580411365e-01,
+    -2.400758277161838e+00,
+    -2.549732539343734e+00,
+     4.374664141464968e+00,
+     2.938163982698783e+00
+  ];
+
+  const d = [
+     7.784695709041462e-03,
+     3.224671290700398e-01,
+     2.445134137142996e+00,
+     3.754408661907416e+00
+  ];
+
+  const plow = 0.02425;
+  const phigh = 1 - plow;
+
+  let q, r;
+
+  if (p < plow){
+    q = Math.sqrt(-2 * Math.log(p));
+    return (((((cc[0]*q + cc[1])*q + cc[2])*q + cc[3])*q + cc[4])*q + cc[5]) /
+           ((((d[0]*q + d[1])*q + d[2])*q + d[3])*q + 1);
+  }
+
+  if (p > phigh){
+    q = Math.sqrt(-2 * Math.log(1 - p));
+    return -(((((cc[0]*q + cc[1])*q + cc[2])*q + cc[3])*q + cc[4])*q + cc[5]) /
+            ((((d[0]*q + d[1])*q + d[2])*q + d[3])*q + 1);
+  }
+
+  q = p - 0.5;
+  r = q*q;
+
+  return (((((a[0]*r + a[1])*r + a[2])*r + a[3])*r + a[4])*r + a[5])*q /
+         (((((b[0]*r + b[1])*r + b[2])*r + b[3])*r + b[4])*r + 1);
+}
+
+function clamp(x, lo, hi){
+  return Math.max(lo, Math.min(hi, x));
+}
+
+function fmt(x, digits){
+  if (!Number.isFinite(x)) return "";
+  return Number(x).toFixed(digits);
+}
+
+})();
+</script>
+</body>
+</html>
