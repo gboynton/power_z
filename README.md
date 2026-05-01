@@ -1,0 +1,1 @@
+Demonstration of power calculations with the classic pair of normal distribuitons.  Users can adjust factors such as the null hypothesis mean, true mean, standard deviation, sample size, alpha and tails.
